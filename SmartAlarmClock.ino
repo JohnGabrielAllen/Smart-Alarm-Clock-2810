@@ -27,6 +27,19 @@ const char* password = "WiFi_Password";
 const byte buzzerPin = 14;
 const byte buttonPins[] = {4, 5, 13, 18}; //{left=4, right=5, select=13, cycle=18}
 
+//Button Variables
+//=======================================================================
+bool lastState4 = HIGH;
+bool lastState5 = HIGH;
+bool lastState13 = HIGH;
+bool lastState18 = HIGH;
+
+//Constant Strings for LCD
+//=======================================================================
+const char* prepScrn = "Set Prep Time:";
+const char* flightScrn = "Set Flight Iata:";
+const char* alarmScrn = "Set Alarm:"
+
 
 
 //Functions
@@ -55,33 +68,78 @@ void readButtons() {
     for (byte i = 0; i < sizeof(buttonPins); i++) {
       byte buttonPin = buttonPins[i];
       if (digitalRead(buttonPin) == LOW) {
+        //Button LOW State or On
         switch(buttonPin){
           case 4:
             //Left Button
-            Serial.print("Red");
+            if(lastState4 == HIGH){
+              Serial.print("Red");
+            }
+            lastState4 = LOW;
             break;
 
           case 5:
             //Right Button
-            Serial.print("Yellow");
+            if(lastState5 == HIGH){
+              Serial.print("Yellow");
+            }
+            lastState5 = LOW;
             break;
 
           case 13:
             //Select Button
-            Serial.print("Green");
+            if(lastState13 == HIGH){
+              Serial.print("Green");
+            }
+            lastState13 = LOW;
+            break;
+
+          case 18:
+            //Cycle Button'
+            if(lastState18 == HIGH){
+              Serial.print("Blue");
+              moveScreen(true);
+              lcd.clear();
+            }
+            lastState18 = LOW;
+            break;
+
+          default:
+            Serial.print("Button Pin Error");
+            break;
+        }
+      }
+      else{
+        //Button HIGH State or Off
+        switch(buttonPin){
+          case 4:
+            //Left Button
+            //RED
+            lastState4 = HIGH;
+            break;
+
+          case 5:
+            //Right Button
+            //Yellow
+            lastState5 = HIGH;
+            break;
+
+          case 13:
+            //Select Button
+            //Green
+            lastState13 = HIGH;
             break;
 
           case 18:
             //Cycle Button
-            Serial.print("Blue");
-            moveScreen(true);
+            //Blue
+            lastState18 = HIGH;
             break;
 
           default:
-            Serial.print("Error");
+            Serial.print("Button Pin Error");
             break;
         }
-        Serial.println(" = LOW");
       }
     }
 }
@@ -104,14 +162,38 @@ time_t getCurrentTime(){
   return baseTime + (millis() - baseMillis) / 1000;
 }
 
+/**
+  Displays time on lcd screen.
+*/
 void clockScreen(){
   time_t now = getCurrentTime();
   struct tm *timeinfo = localtime(&now);
-  char buffer[12];
+  char buffer[15];
   strftime(buffer, sizeof(buffer), "%I:%M %p %a", timeinfo);
   lcd.setCursor(0,0);
   lcd.print(buffer);
   Serial.println(buffer);
+}
+
+/**
+  Allows the user to set the buffer time between when their flight arrives and when they wake up.
+*/
+void prepScreen(){
+
+}
+
+/**
+  Allows the user to set the flight Iata and Arrival/Departure status of their flight.
+*/
+void flightScreen(){
+
+}
+
+/**
+  Allows the user to toggle the smart alarm on and off.
+*/
+void alarmScreen(){
+
 }
 
 //Setup
@@ -129,7 +211,11 @@ void setup() {
 
   //Connect WiFi, if connection fails wait 1/2 sec and try again
   WiFi.begin(ssid, password);
-  while(WiFi.status() != WL_CONNECTED) { delay(500); }
+  while(WiFi.status() != WL_CONNECTED) { 
+    delay(500); 
+    Serial.println("Connecting to WiFi...");
+    }
+  Serial.println("WiFi Connected!");
 
   //Sync ESP32 Clock with NTP server
   configTime(gmtOffset, daylightOffset, ntpServer, ntpServer2);
@@ -138,6 +224,7 @@ void setup() {
 
   //LCD Setup
   lcd.init();
+  lcd.clear();
   lcd.backlight();
 
   Serial.println("Setup Finished!");
@@ -153,14 +240,21 @@ void loop() {
       break;
     case 1:
       //TODO
+      lcd.setCursor(0,0);
+      lcd.println("Screen 2");
       break;
     case 2:
       //TODO
+      lcd.setCursor(0,0);
+      lcd.println("Screen 3");
       break;
     case 3:
       //TODO
+      lcd.setCursor(0,0);
+      lcd.println("Screen 4");
       break;
     default:
+      lcd.setCursor(0,0);
       Serial.println("Invalid Screen Pointer - Error!");
       break;
   }
