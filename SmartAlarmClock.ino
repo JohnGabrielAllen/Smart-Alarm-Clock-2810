@@ -2,6 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
 #include <time.h>
+#include <Weather.h>
 
 byte maxScreenPointer = 3;
 byte screenPointer = 0;
@@ -19,8 +20,8 @@ unsigned long baseMillis;
 
 //WiFi Setup
 //=======================================================================
-const char* ssid     = "WiFi_Name";
-const char* password = "WiFi_Password";
+const char* ssid     = "WiFi_Name"; //WiFi_Name
+const char* password = "WiFi_Password"; //WiFi_Password
 
 //PIN Setup
 //=======================================================================
@@ -38,8 +39,12 @@ bool lastState18 = HIGH;
 //=======================================================================
 const char* prepScrn = "Set Prep Time:";
 const char* flightScrn = "Set Flight Iata:";
-const char* alarmScrn = "Set Alarm:"
+const char* alarmScrn = "Set Alarm:";
 
+//Timer Variables
+//=======================================================================
+unsigned long lastWeatherUpdate = 0;
+unsigned long lastWeatherPrint = 0;
 
 
 //Functions
@@ -73,7 +78,7 @@ void readButtons() {
           case 4:
             //Left Button
             if(lastState4 == HIGH){
-              Serial.print("Red");
+              Serial.println("Red");
             }
             lastState4 = LOW;
             break;
@@ -81,7 +86,7 @@ void readButtons() {
           case 5:
             //Right Button
             if(lastState5 == HIGH){
-              Serial.print("Yellow");
+              Serial.println("Yellow");
             }
             lastState5 = LOW;
             break;
@@ -89,7 +94,7 @@ void readButtons() {
           case 13:
             //Select Button
             if(lastState13 == HIGH){
-              Serial.print("Green");
+              Serial.println("Green");
             }
             lastState13 = LOW;
             break;
@@ -97,7 +102,7 @@ void readButtons() {
           case 18:
             //Cycle Button'
             if(lastState18 == HIGH){
-              Serial.print("Blue");
+              Serial.println("Blue");
               moveScreen(true);
               lcd.clear();
             }
@@ -145,9 +150,9 @@ void readButtons() {
 }
 
 /**
-  Syncs ESP32 time.
+  Initializes ESP32 time.
 */
-void syncTime(){
+void initTime(){
   struct tm timeinfo;
   if (getLocalTime(&timeinfo)) {
     time(&baseTime);
@@ -170,9 +175,21 @@ void clockScreen(){
   struct tm *timeinfo = localtime(&now);
   char buffer[15];
   strftime(buffer, sizeof(buffer), "%I:%M %p %a", timeinfo);
-  lcd.setCursor(0,0);
+  lcd.setCursor(2,0);
   lcd.print(buffer);
-  Serial.println(buffer);
+
+  // Serial.println(buffer);
+
+  //Every 1.5 Seconds
+  if(millis() - lastWeatherPrint > 1500) {
+    lastWeatherPrint = millis();
+    printWeather(lcd);
+  }
+  //Every 5 Minutes
+  if(millis() - lastWeatherUpdate > 300000){
+    lastWeatherUpdate = millis();
+    getWeather(lcd);
+  }
 }
 
 /**
@@ -220,12 +237,15 @@ void setup() {
   //Sync ESP32 Clock with NTP server
   configTime(gmtOffset, daylightOffset, ntpServer, ntpServer2);
   delay(2000);
-  syncTime();
+  initTime();
 
   //LCD Setup
   lcd.init();
   lcd.clear();
   lcd.backlight();
+
+  //Get initial weather
+  getWeather(lcd);
 
   Serial.println("Setup Finished!");
 }
