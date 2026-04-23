@@ -6,8 +6,42 @@
 
 byte maxScreenPointer = 3;
 byte screenPointer = 0;
+byte editStage = 0;
 LiquidCrystal_I2C lcd(0x27,16,2);
+char pSkipLast;
+char currentSkip;
 
+struct tm offsetTime;
+const byte offsetHourMax = 10;
+const byte offsetMinuteMax = 59;
+
+//Note Frequencies
+//=======================================================================
+int c = 262;
+int cs = 277;
+int d = 294;
+int ds = 311;
+int e = 330;
+int f = 349;
+int fs = 370;
+int g = 392;
+int gs = 415;
+int a = 440;
+int as = 466;
+int b = 494;
+
+int c_high  = 523;
+int cs_high = 554;
+int d_high  = 587;
+int ds_high = 622;
+int e_high  = 659;
+int f_high  = 698;
+int fs_high = 740;
+int g_high  = 784;
+int gs_high = 831;
+int a_high  = 880;
+int as_high = 932;
+int b_high  = 988;
 
 //Clock Setup
 //=======================================================================
@@ -34,21 +68,84 @@ bool lastState4 = HIGH;
 bool lastState5 = HIGH;
 bool lastState13 = HIGH;
 bool lastState18 = HIGH;
+bool indicatorState = true;
+bool noteState = false;
+bool playSound = false;
 
 //Constant Strings for LCD
 //=======================================================================
 const char* prepScrn = "Set Prep Time:";
+const char* prepScrnEdit = "Edit Prep Time ";
 const char* flightScrn = "Set Flight Iata:";
 const char* alarmScrn = "Set Alarm:";
+
+//Custom Characters for LCD
+//=======================================================================
+byte check[8] = { B00001, B00011, B00011, B00110, B10110, B11110, B11100, B01100 };
+byte diamond[8] = { B00000, B00100, B01110, B11111, B01110, B00100, B00000, B00000 };
+byte diamond2[8] = { B00000, B00000, B00100, B01110, B11111, B01110, B00100, B00000 };
+byte cursor[8] = { B00001, B00011, B00111, B01111, B01111, B00111, B00011, B00001 };
+byte cursor2[8] = { B10000, B10000, B10000, B10000, B10000, B10000, B10000, B10000 };
+byte wall[8] = { B11111, B11111, B11111, B11111, B11111, B11111, B11111, B11111 };
 
 //Timer Variables
 //=======================================================================
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastWeatherPrint = 0;
-
+unsigned long selectionIndicatorTime = 0;
+unsigned long selectionIndicator2Time = 0;
+unsigned long noteTime = 0;
 
 //Functions
 //=======================================================================
+
+/**
+  Helper method for incrementing and decrimenting offsetTime.
+  right - increments if true decrements if false
+  hour - changes hour if true minutes if false
+*/
+void changeOffset(bool right, bool hour){
+  if(right){ //Increment
+    if(hour){
+      offsetTime.tm_hour++;
+      if(offsetTime.tm_hour > offsetHourMax) {offsetTime.tm_hour = 0;}
+    }
+    else{ //Minutes
+      offsetTime.tm_min+=5;
+      if(offsetTime.tm_min > offsetMinuteMax) {offsetTime.tm_min = 0;}
+    }
+  }
+  else{ //Decriment
+    if(hour){
+      offsetTime.tm_hour--;
+      if(offsetTime.tm_hour < 0) {offsetTime.tm_hour = offsetHourMax;}
+    }
+    else{ //Minutes
+      offsetTime.tm_min-=5;
+      if(offsetTime.tm_min < 0) {offsetTime.tm_min = offsetMinuteMax;}
+    }
+  }
+}
+
+/**
+  Work in progress may need different approach.
+  Potentially play notes on the other core to prevent timing issues
+  Large scope bool and run this in the main loop when true activate the bool remotely
+*/
+void playNote(int frequency, int duration) {
+  if(!noteState){
+    Serial.println("Note Begin");
+    ledcWriteTone(buzzerPin, frequency);
+    noteState = !noteState;
+  }
+  else if(millis() - noteTime > duration){
+    ledcWriteTone(buzzerPin, 0);
+    noteTime = millis();
+    noteState = !noteState;
+    playSound = false;
+    Serial.println("Sound End");
+  }
+}
 
 /**
   Moves the screenPointer left if False or right if True.
@@ -73,12 +170,39 @@ void readButtons() {
     for (byte i = 0; i < sizeof(buttonPins); i++) {
       byte buttonPin = buttonPins[i];
       if (digitalRead(buttonPin) == LOW) {
-        //Button LOW State or On
+        //Button LOW State or On ------------------------------------------------------------------------------------------------------------------
         switch(buttonPin){
           case 4:
             //Left Button
             if(lastState4 == HIGH){
-              Serial.println("Red");
+              // Serial.println("Red");
+              switch(screenPointer){
+                case 0:
+                  //TODO
+                  break;
+                case 1:
+                  //Prep Time Screen
+                  switch(editStage){
+                    case 1:
+                      //Hours
+                      changeOffset(false, true);
+                      break;
+                    case 2:
+                      //Minutes
+                      changeOffset(false, false);
+                      break;
+                  }
+                  break;
+                case 2:
+                  //TODO
+                  break;
+                case 3:
+                  //TODO
+                  break;
+                default:
+                  Serial.println("Screen Pointer Error");
+                  break;
+              }
             }
             lastState4 = LOW;
             break;
@@ -86,23 +210,73 @@ void readButtons() {
           case 5:
             //Right Button
             if(lastState5 == HIGH){
-              Serial.println("Yellow");
+              // Serial.println("Yellow");
+              switch(screenPointer){
+                case 0:
+                  //TODO
+                  break;
+                case 1:
+                  //Prep Time Screen
+                  switch(editStage){
+                    case 1:
+                      //Hours
+                      changeOffset(true, true);
+                      break;
+                    case 2:
+                      //Minutes
+                      changeOffset(true, false);
+                      break;
+                  }
+                  break;
+                case 2:
+                  //TODO
+                  break;
+                case 3:
+                  //TODO
+                  break;
+                default:
+                  Serial.println("Screen Pointer Error");
+                  break;
+              }
             }
             lastState5 = LOW;
             break;
 
           case 13:
             //Select Button
+            //TODO switch on screenPointer and add further button logic, create a tm struct that can be altered then display H:MM based on that.
             if(lastState13 == HIGH){
-              Serial.println("Green");
+              // Serial.println("Green");
+              switch(screenPointer){
+                case 0:
+                  //TODO
+                  break;
+                case 1:
+                  //Prep Time Screen
+                  lcd.clear();
+                  editStage++;
+                  if(editStage > 2) {editStage = 0;}
+                  break;
+                case 2:
+                  //TODO
+                  break;
+                case 3:
+                  //TODO
+                  break;
+                default:
+                  Serial.println("Screen Pointer Error");
+                  break;
+              }
             }
             lastState13 = LOW;
             break;
 
           case 18:
-            //Cycle Button'
+            //Cycle Button
             if(lastState18 == HIGH){
-              Serial.println("Blue");
+              // Serial.println("Blue");
+              // playSound = true;
+              editStage = 0;
               moveScreen(true);
               lcd.clear();
             }
@@ -115,7 +289,7 @@ void readButtons() {
         }
       }
       else{
-        //Button HIGH State or Off
+        //Button HIGH State or Off ------------------------------------------------------------------------------------------------------------------
         switch(buttonPin){
           case 4:
             //Left Button
@@ -147,6 +321,47 @@ void readButtons() {
         }
       }
     }
+}
+
+//TODO selectionIndicator where instead of using replaceChar uses replaceString and seperate positioning for it, I believe this will fix my previous visual lag issues.
+
+/**
+  Displays a blinking selection indicator icon at the given position on the lcd.
+  TODO Consider different delay times for indicator and replaceChar
+*/
+void selectionIndicator(LiquidCrystal_I2C &lcd, byte col, byte row, char replaceChar = ' ', byte indicator = 0, int charTime = 1000, int indicatorTime = 1000){
+  if(indicatorState){
+    if(millis() - selectionIndicatorTime > charTime){
+      indicatorState = false;
+      selectionIndicatorTime = millis();
+      lcd.setCursor(col, row);
+      lcd.write(indicator);
+    }
+  }
+  else{
+    if(millis() - selectionIndicatorTime > indicatorTime){
+      indicatorState = true;
+      selectionIndicatorTime = millis();
+      lcd.setCursor(col, row);
+      lcd.print(replaceChar);
+    }
+  }
+}
+
+/**
+  Method prints a string and skips a specific char in the print to allow selectionIndicator to work on existing text.
+*/
+char printSkip(LiquidCrystal_I2C &lcd, String text, int skipIndex, int col = 0, int row = 0){
+  lcd.setCursor(col, row);
+  for(int i = 0; i < text.length(); i++){
+    if(i == skipIndex) {
+      col++;
+      continue;
+    }
+    lcd.setCursor(col++, row);
+    lcd.print(text[i]);
+  }
+  return text[skipIndex];
 }
 
 /**
@@ -196,7 +411,43 @@ void clockScreen(){
   Allows the user to set the buffer time between when their flight arrives and when they wake up.
 */
 void prepScreen(){
+  //Format PrepTime variables
+  char timeStr[6];
+  sprintf(timeStr, "%02d:%02d", offsetTime.tm_hour, offsetTime.tm_min);
 
+  switch(editStage){
+    case 0:
+      //Row 1
+      lcd.setCursor(0,0);
+      lcd.print("Prep Time: ");
+      lcd.print(timeStr);
+      //Row 2
+      lcd.setCursor(0,1);
+      lcd.print(prepScrnEdit);
+      selectionIndicator(lcd, 15, 1);
+      break;
+    case 1:
+      //Row 1
+      lcd.setCursor(0,0);
+      lcd.print(prepScrn);
+      //Row 2
+      lcd.setCursor(0,1);
+      lcd.print(timeStr);
+      // currentSkip = printSkip(lcd, timeStr, 1, 0, 1);
+      // selectionIndicator(lcd, 1, 1, currentSkip, 1, 1000, 333);
+      break;
+    case 2:
+      //Row 1
+      lcd.setCursor(0,0);
+      lcd.print(prepScrn);
+      //Row 2
+      lcd.setCursor(0,1);
+      lcd.print(timeStr);
+      // selectionIndicator(lcd, 4, 1, printSkip(lcd, timeStr, 4, 0, 1), 1, 1000, 333);
+      //TODO
+      break;
+  }
+  
 }
 
 /**
@@ -216,6 +467,12 @@ void alarmScreen(){
 //Setup
 //=======================================================================
 void setup() {
+  //Setup Buzzer
+  ledcAttach(buzzerPin, 2000, 8);
+
+  //tm objects setup
+  memset(&offsetTime, 0, sizeof(offsetTime));
+
   //Serial.print(String) is used for debugging purposes
   Serial.begin(115200);
   delay(1000);
@@ -226,12 +483,12 @@ void setup() {
     pinMode(buttonPins[i], INPUT_PULLUP);
   }
 
-  //Connect WiFi, if connection fails wait 1/2 sec and try again
+  //Connect WiFi, if connection fails wait 1.5 sec and try again
   WiFi.begin(ssid, password);
   while(WiFi.status() != WL_CONNECTED) { 
-    delay(500); 
+    delay(1500); 
     Serial.println("Connecting to WiFi...");
-    }
+  }
   Serial.println("WiFi Connected!");
 
   //Sync ESP32 Clock with NTP server
@@ -243,16 +500,30 @@ void setup() {
   lcd.init();
   lcd.clear();
   lcd.backlight();
+  lcd.createChar(0, check);
+  lcd.createChar(1, wall);
+  lcd.createChar(2, diamond2);
+  lcd.createChar(3, cursor);
+  lcd.createChar(4, cursor2);
 
   //Get initial weather
   getWeather(lcd);
 
-  Serial.println("Setup Finished!");
+  // ledcWriteTone(14, 262);
+  // delay(300);
+  // ledcWriteTone(14, 0);
+  Serial.println("\n\nSetup Finished!\n");
 }
 
 //MAIN - Loop
 //=======================================================================
 void loop() {
+  if(playSound){
+    Serial.println("Playing Sound");
+    playNote(c, 1000);
+  }
+
+  // screenPointer = 7; //Test Case - Debugging
 
   switch(screenPointer){
     case 0:
@@ -260,8 +531,9 @@ void loop() {
       break;
     case 1:
       //TODO
-      lcd.setCursor(0,0);
-      lcd.println("Screen 2");
+      // lcd.setCursor(0,0);
+      // lcd.println("Screen 2");
+      prepScreen();
       break;
     case 2:
       //TODO
@@ -273,6 +545,17 @@ void loop() {
       lcd.setCursor(0,0);
       lcd.println("Screen 4");
       break;
+    case 7:
+      //Test Case - Debugging
+      // lcd.setCursor(0,0);
+      lcd.setCursor(1,0);
+      lcd.print("3");
+      delay(2000);
+      Serial.println("Delay OVER");
+      currentSkip = printSkip(lcd, "Hello World", 1, 0, 0);
+      delay(2000);
+      lcd.print(currentSkip);
+      Serial.println(currentSkip);
     default:
       lcd.setCursor(0,0);
       Serial.println("Invalid Screen Pointer - Error!");
