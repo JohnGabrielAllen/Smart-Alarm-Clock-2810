@@ -15,7 +15,7 @@ struct tm offsetTime;
 const byte offsetHourMax = 10;
 const byte offsetMinuteMax = 55;
 
-//Note Frequencies
+//Note Frequencies - may git rid of after decided on alarm tone to save memory
 //=======================================================================
 int c = 262;
 int cs = 277;
@@ -54,8 +54,8 @@ unsigned long baseMillis;
 
 //WiFi Setup
 //=======================================================================
-const char* ssid     = "Allen"; //WiFi_Name
-const char* password = "PsCaBiWaLqCa"; //WiFi_Password
+const char* ssid     = "WiFi_Name"; //WiFi_Name
+const char* password = "WiFi_Password"; //WiFi_Password
 const char* apiKey   = "API_Key"; //API_Key
 //API call example:
 //https://aviation-edge.com/v2/public/timetable?key=API_KEY&flight_iata=DL12345&type=arrival
