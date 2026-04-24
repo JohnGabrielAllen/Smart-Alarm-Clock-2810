@@ -3,9 +3,14 @@
 #include <WiFi.h>
 #include <time.h>
 #include <Weather.h>
+#include <ArduinoJson.h>
+#include <HTTPClient.h>
 
 byte maxScreenPointer = 3;
 byte screenPointer = 0;
+byte maxAlphabetPointer = 36;
+byte flightEditPointer = 0;
+byte alphabetPointer = 0;
 byte editStage = 0;
 LiquidCrystal_I2C lcd(0x27,16,2);
 char pSkipLast;
@@ -56,10 +61,18 @@ unsigned long baseMillis;
 //=======================================================================
 const char* ssid     = "WiFi_Name"; //WiFi_Name
 const char* password = "WiFi_Password"; //WiFi_Password
-const char* apiKey   = "API_Key"; //API_Key
-//API call example:
-//https://aviation-edge.com/v2/public/timetable?key=API_KEY&flight_iata=DL12345&type=arrival
-//Use ArduinoJson buffer size determined here: https://arduinojson.org/v6/assistant
+const String apiKey   = "API_Key"; //API_Key
+
+//API Setup
+//=======================================================================
+DynamicJsonDocument flightDoc(3072);
+String apiEndpoint = "https://aviation-edge.com/v2/public/timetable?key=" + apiKey + "&flight_iata="; // + "&type=";
+String flightIata = "                ";
+String flightType;
+int departureDelay;
+int arrivalDelay;
+String departureScheduledTime;
+String arrivalScheduledTime;
 
 //PIN Setup
 //=======================================================================
@@ -79,9 +92,11 @@ bool indicatorState = true;
 bool noteState = false;
 bool playSound = false;
 bool smartAlarm = true;
+bool validFlight = false;
 
 //Constant Strings for LCD
 //=======================================================================
+const char alphabet[37] = {' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 const char* prepScrn = "Set Prep Time:";
 const char* prepScrnEdit = "Edit Prep Time ";
 const char* flightScrn = "Set Flight Iata: ";
@@ -106,6 +121,111 @@ unsigned long noteTime = 0;
 
 //Functions
 //=======================================================================
+
+void printAPIVariables(){
+  lcd.println("Arrival\n==============");
+  lcd.print("Scheduled Time: ");
+  lcd.println(arrivalScheduledTime);
+  lcd.print("Delay: ");
+  lcd.println(arrivalDelay);
+
+  lcd.println("\Departure\n==============");
+  lcd.print("Scheduled Time: ");
+  lcd.println(departureScheduledTime);
+  lcd.print("Delay: ");
+  lcd.println(departureDelay);
+}
+
+/**
+  Combines the individual parts of the API endpoint
+*/
+String createFullEndpoint(){
+  String trimmedFlightIata = flightIata;
+  trimmedFlightIata.trim();
+  return apiEndpoint + trimmedFlightIata + "&type=" + flightType;
+}
+
+/**
+  Checks if the endpoint is returning valid data
+*/
+bool checkFullEndpoint(){
+  HTTPClient http;
+  http.begin(createFullEndpoint());
+  int httpCode = http.GET();
+
+  //Request failed
+  if (httpCode <= 0) {
+    http.end();
+    return false;
+  }
+  //Bad response
+  if (httpCode != 200) {
+    http.end();
+    return false; 
+  }
+
+  String result = http.getString();
+  http.end();
+
+  flightDoc.clear();
+  DeserializationError error = deserializeJson(flightDoc, result);
+
+  //Invalid JSON
+  if (error) {
+    Serial.println("Deserialization Error");
+    return false; 
+  }
+
+  // check for expected fields
+  // if (!flightDoc.containsKey("flight") ||
+  //     !flightDoc.containsKey("status") ) {
+  //   return false;
+  // }
+
+
+  //Extract response variables
+  if (!flightDoc.isNull() && flightDoc.size() > 0) {
+
+    JsonObject flight = flightDoc[0];
+
+    //Departure Values
+    if (!flight["departure"].isNull()){
+      departureScheduledTime = flightDoc[0]["departure"]["scheduledTime"].as<String>();
+      departureScheduledTime = flightDoc[0]["departure"]["delay"].as<String>();
+    }
+
+    //Arrival Values
+    if (!flight["arrival"].isNull()){
+      arrivalScheduledTime = flightDoc[0]["arrival"]["scheduledTime"].as<String>();
+      arrivalScheduledTime = flightDoc[0]["arrival"]["delay"].as<String>();
+    }
+  }
+
+  return true;
+}
+
+/**
+  Returns the current letter of the alphabet.
+*/
+char getAlphabet(){
+  return alphabet[alphabetPointer];
+}
+
+/**
+  Moves the pointer for the alphabet.
+*/
+void moveAlphabet(bool right){
+  if(right){
+    //Increment
+    alphabetPointer++;
+    if(alphabetPointer > maxAlphabetPointer) {alphabetPointer = 0;}
+  }
+  else{
+    //Decrement
+    if(alphabetPointer == 0) {alphabetPointer = maxAlphabetPointer;}
+    else{alphabetPointer--;}
+  }
+}
 
 /**
   Helper method for incrementing and decrimenting offsetTime.
@@ -186,7 +306,7 @@ void readButtons() {
               // Serial.println("Red");
               switch(screenPointer){
                 case 0:
-                  //TODO
+                  //Do nothing
                   break;
                 case 1:
                   //Prep Time Screen
@@ -202,10 +322,26 @@ void readButtons() {
                   }
                   break;
                 case 2:
-                  //TODO
+                  //Flight Edit Screen
+                  switch(editStage){
+                    case 0:
+                      if(editStage == 0){
+                        moveAlphabet(false);
+                        // Serial.println(getAlphabet());
+                      }
+                      break;
+                    case 1:
+                      editStage++;
+                      lcd.clear();
+                      break;
+                    case 2:
+                      editStage--;
+                      lcd.clear();
+                      break;
+                  }
                   break;
                 case 3:
-                  //TODO
+                  //Not used, may implement further functionality here later
                   break;
                 default:
                   Serial.println("Screen Pointer Error");
@@ -221,7 +357,7 @@ void readButtons() {
               // Serial.println("Yellow");
               switch(screenPointer){
                 case 0:
-                  //TODO
+                  //Do nothing
                   break;
                 case 1:
                   //Prep Time Screen
@@ -237,7 +373,23 @@ void readButtons() {
                   }
                   break;
                 case 2:
-                  //TODO
+                  //Flight Edit Screen
+                  switch(editStage){
+                    case 0:
+                      if(editStage == 0){
+                        moveAlphabet(true);
+                        // Serial.println(getAlphabet());
+                      }
+                      break;
+                    case 1:
+                      editStage++;
+                      lcd.clear();
+                      break;
+                    case 2:
+                      editStage--;
+                      lcd.clear();
+                      break;
+                  }
                   break;
                 case 3:
                   //TODO
@@ -265,7 +417,53 @@ void readButtons() {
                   if(editStage > 2) {editStage = 0;}
                   break;
                 case 2:
-                  //TODO
+                  //Flight Edit Screen
+                  switch(editStage){
+                    case 0:
+                      if(alphabetPointer == 0){ //Condition user enters an empty character
+                        lcd.clear();
+                        editStage++;
+                        flightEditPointer = 0;
+                        Serial.println(flightIata);
+                        break;
+                      }
+                      flightEditPointer++;
+                      alphabetPointer = 0;
+                      if(flightEditPointer > 15){ //Condition user enters a character on the last position on the lcd
+                        lcd.clear();
+                        flightEditPointer = 0;
+                        editStage++;
+                        Serial.println(flightIata);
+                      }
+                      break;
+                    case 1:
+                      flightType = "arrival";
+                      editStage = 3;
+                      Serial.println(flightType);
+                      lcd.clear();
+                      Serial.print("API: ");
+                      Serial.println(createFullEndpoint());
+
+                      Serial.print("Valid Endpoint: ");
+                      Serial.println(checkFullEndpoint());
+                      printAPIVariables();
+                      break;
+                    case 2:
+                      flightType = "departure";
+                      editStage = 3;
+                      Serial.println(flightType);
+                      lcd.clear();
+                      Serial.print("API: ");
+                      Serial.println(createFullEndpoint());
+
+                      Serial.print("Valid Endpoint: ");
+                      Serial.println(checkFullEndpoint());
+                      printAPIVariables();
+                      break;
+                    case 3:
+                      //TODO
+                      break;
+                  }
                   break;
                 case 3:
                   //Alarm Screen
@@ -505,7 +703,48 @@ void prepScreen(){
   Allows the user to set the flight Iata and Arrival/Departure status of their flight.
 */
 void flightScreen(){
+  switch(editStage){
+    case 0:
+      //Row 1
+      lcd.setCursor(0,0);
+      lcd.print(flightScrn);
+      //Row 2
+      flightIata[flightEditPointer] = getAlphabet();
+      if(!indicatorState){
+        lcd.setCursor(0,1);
+        lcd.print(flightIata);
+      }   
+      selectionIndicator(lcd, flightEditPointer, 1, 1, 1000, 333);
+      //TODO
+      break;
+    case 1:
+      //ROW 1
+      lcd.setCursor(0,0);
+      lcd.print("Arrival");
+      blinkIndicator(lcd, 10, 0, ' ', 0, 1000, 1000);
+      //ROW 2
+      lcd.setCursor(0,1);
+      lcd.print("Departure");
+      break;
+    case 2:
+      //ROW 1
+      lcd.setCursor(0,0);
+      lcd.print("Arrival");
+      //ROW 2
+      lcd.setCursor(0,1);
+      lcd.print("Departure");
+      blinkIndicator(lcd, 10, 1, ' ', 0, 1000, 1000);
+      break;
+    case 3:
+      //display flightIata
+      lcd.setCursor(0,0);
+      lcd.print(flightIata);
+      //show if api found flight
+      lcd.setCursor(0,1);
+      lcd.print("Flight: "); //Found or Missing
+      //TODO
 
+  }
 }
 
 /**
@@ -600,20 +839,12 @@ void loop() {
       clockScreen();
       break;
     case 1:
-      //TODO
-      // lcd.setCursor(0,0);
-      // lcd.println("Screen 2");
       prepScreen();
       break;
     case 2:
-      //TODO
-      lcd.setCursor(0,0);
-      lcd.println("Screen 3");
+      flightScreen();
       break;
     case 3:
-      //TODO
-      // lcd.setCursor(0,0);
-      // lcd.println("Screen 4");
       alarmScreen();
       break;
     case 7:
