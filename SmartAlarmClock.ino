@@ -13,9 +13,9 @@ char currentSkip;
 
 struct tm offsetTime;
 const byte offsetHourMax = 10;
-const byte offsetMinuteMax = 59;
+const byte offsetMinuteMax = 55;
 
-//Note Frequencies
+//Note Frequencies - may git rid of after decided on alarm tone to save memory
 //=======================================================================
 int c = 262;
 int cs = 277;
@@ -56,6 +56,10 @@ unsigned long baseMillis;
 //=======================================================================
 const char* ssid     = "WiFi_Name"; //WiFi_Name
 const char* password = "WiFi_Password"; //WiFi_Password
+const char* apiKey   = "API_Key"; //API_Key
+//API call example:
+//https://aviation-edge.com/v2/public/timetable?key=API_KEY&flight_iata=DL12345&type=arrival
+//Use ArduinoJson buffer size determined here: https://arduinojson.org/v6/assistant
 
 //PIN Setup
 //=======================================================================
@@ -68,16 +72,20 @@ bool lastState4 = HIGH;
 bool lastState5 = HIGH;
 bool lastState13 = HIGH;
 bool lastState18 = HIGH;
+
+//Other Boolean Variables
+//=======================================================================
 bool indicatorState = true;
 bool noteState = false;
 bool playSound = false;
+bool smartAlarm = true;
 
 //Constant Strings for LCD
 //=======================================================================
 const char* prepScrn = "Set Prep Time:";
 const char* prepScrnEdit = "Edit Prep Time ";
-const char* flightScrn = "Set Flight Iata:";
-const char* alarmScrn = "Set Alarm:";
+const char* flightScrn = "Set Flight Iata: ";
+const char* alarmScrn = "Smart Alarm: ";
 
 //Custom Characters for LCD
 //=======================================================================
@@ -150,7 +158,7 @@ void playNote(int frequency, int duration) {
 /**
   Moves the screenPointer left if False or right if True.
 */
-void moveScreen(bool direction){
+void moveScreen(bool direction = true){
   if(direction){
     screenPointer++;
     if(screenPointer > maxScreenPointer){ screenPointer = 0; }
@@ -244,12 +252,11 @@ void readButtons() {
 
           case 13:
             //Select Button
-            //TODO switch on screenPointer and add further button logic, create a tm struct that can be altered then display H:MM based on that.
             if(lastState13 == HIGH){
               // Serial.println("Green");
               switch(screenPointer){
                 case 0:
-                  //TODO
+                  //Do Nothing - clock screen
                   break;
                 case 1:
                   //Prep Time Screen
@@ -261,7 +268,8 @@ void readButtons() {
                   //TODO
                   break;
                 case 3:
-                  //TODO
+                  //Alarm Screen
+                  smartAlarm = !smartAlarm;
                   break;
                 default:
                   Serial.println("Screen Pointer Error");
@@ -323,13 +331,58 @@ void readButtons() {
     }
 }
 
-//TODO selectionIndicator where instead of using replaceChar uses replaceString and seperate positioning for it, I believe this will fix my previous visual lag issues.
+
+/**
+  Displays a selection indicator icon at the given position on the lcd.
+  Intended to be used in conjunction with constantly writing what you want beneath the cursor.
+*/
+void selectionIndicator(LiquidCrystal_I2C &lcd, byte col = 0, byte row = 0, byte indicator = 0, int offTime = 1000, int onTime = 300){
+  //Don't write for offTime
+  if(!indicatorState){
+    if(millis() - selectionIndicatorTime > offTime){
+      indicatorState = true;
+      selectionIndicatorTime = millis();
+    }
+  }
+  else{
+    //Write constantly for onTime
+    lcd.setCursor(col, row);
+    lcd.write(indicator);
+    if(millis() - selectionIndicatorTime > onTime){
+      indicatorState = false;
+      selectionIndicatorTime = millis();
+    }
+  }
+}
 
 /**
   Displays a blinking selection indicator icon at the given position on the lcd.
-  TODO Consider different delay times for indicator and replaceChar
+  strTime - how long String is there before indicator overwrites it
+  indTime - how long indicator is there before string overwrites it
 */
-void selectionIndicator(LiquidCrystal_I2C &lcd, byte col, byte row, char replaceChar = ' ', byte indicator = 0, int charTime = 1000, int indicatorTime = 1000){
+void blinkIndicator(LiquidCrystal_I2C &lcd, byte strCol, byte strRow, byte indCol, byte indRow, String replaceString = " ", byte indicator = 0, int strTime = 1000, int indTime = 1000){
+  if(indicatorState){
+    if(millis() - selectionIndicatorTime > strTime){
+      indicatorState = false;
+      selectionIndicatorTime = millis();
+      lcd.setCursor(indCol, indRow);
+      lcd.write(indicator);
+    }
+  }
+  else{
+    if(millis() - selectionIndicatorTime > indTime){
+      indicatorState = true;
+      selectionIndicatorTime = millis();
+      lcd.setCursor(strCol, strRow);
+      lcd.print(replaceString);
+    }
+  }
+}
+
+/**
+  Displays a blinking selection indicator icon at the given position on the lcd.
+*/
+void blinkIndicator(LiquidCrystal_I2C &lcd, byte col, byte row, char replaceChar = ' ', byte indicator = 0, int charTime = 1000, int indicatorTime = 1000){
   if(indicatorState){
     if(millis() - selectionIndicatorTime > charTime){
       indicatorState = false;
@@ -424,7 +477,7 @@ void prepScreen(){
       //Row 2
       lcd.setCursor(0,1);
       lcd.print(prepScrnEdit);
-      selectionIndicator(lcd, 15, 1);
+      blinkIndicator(lcd, 15, 1);
       break;
     case 1:
       //Row 1
@@ -433,8 +486,7 @@ void prepScreen(){
       //Row 2
       lcd.setCursor(0,1);
       lcd.print(timeStr);
-      // currentSkip = printSkip(lcd, timeStr, 1, 0, 1);
-      // selectionIndicator(lcd, 1, 1, currentSkip, 1, 1000, 333);
+      selectionIndicator(lcd, 1, 1, 1, 1000, 333);
       break;
     case 2:
       //Row 1
@@ -443,8 +495,7 @@ void prepScreen(){
       //Row 2
       lcd.setCursor(0,1);
       lcd.print(timeStr);
-      // selectionIndicator(lcd, 4, 1, printSkip(lcd, timeStr, 4, 0, 1), 1, 1000, 333);
-      //TODO
+      selectionIndicator(lcd, 4, 1, 1, 1000, 333);
       break;
   }
   
@@ -459,8 +510,27 @@ void flightScreen(){
 
 /**
   Allows the user to toggle the smart alarm on and off.
+  //Possible TODO when toggled off functionality to instead manually set an alarm
 */
 void alarmScreen(){
+  switch(editStage){
+    case 0:
+      lcd.setCursor(0,0);
+      lcd.print(alarmScrn);
+      if(smartAlarm){
+        lcd.print("On ");
+      }
+      else{
+        lcd.print("Off");
+      }
+      selectionIndicator(lcd, 13, 0, 1, 1000, 300);
+      break;
+    case 1:
+      //Would be for if manual alarm functionality is added
+      break;
+  }
+  
+  
 
 }
 
@@ -476,7 +546,7 @@ void setup() {
   //Serial.print(String) is used for debugging purposes
   Serial.begin(115200);
   delay(1000);
-  Serial.println("Setup Started");
+  Serial.println("\nSetup Started");
 
   //Set Pins
   for (byte i = 0; i < sizeof(buttonPins); i++) {
@@ -512,7 +582,7 @@ void setup() {
   // ledcWriteTone(14, 262);
   // delay(300);
   // ledcWriteTone(14, 0);
-  Serial.println("\n\nSetup Finished!\n");
+  Serial.println("Setup Finished!\n=========================\n");
 }
 
 //MAIN - Loop
@@ -542,8 +612,9 @@ void loop() {
       break;
     case 3:
       //TODO
-      lcd.setCursor(0,0);
-      lcd.println("Screen 4");
+      // lcd.setCursor(0,0);
+      // lcd.println("Screen 4");
+      alarmScreen();
       break;
     case 7:
       //Test Case - Debugging
