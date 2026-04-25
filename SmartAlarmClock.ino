@@ -68,7 +68,7 @@ const String apiKey   = "API_Key"; //API_Key
 //=======================================================================
 DynamicJsonDocument flightDoc(3072);
 String apiEndpoint = "https://aviation-edge.com/v2/public/timetable?key=" + apiKey + "&flight_iata="; // + "&type=";
-String flightIata = "DL1451          "; //"                "
+String flightIata = "DL1431          "; //"                "
 String flightType;
 int departureDelay;
 int arrivalDelay;
@@ -98,6 +98,9 @@ bool smartAlarm = true;
 bool validFlight = false;
 bool alphabetDisplayLock = false;
 bool arrival;
+bool snooze = false;
+bool alarmActive = true;
+bool startSnoozeTime = false;
 
 //Constant Strings for LCD
 //=======================================================================
@@ -123,6 +126,10 @@ unsigned long lastWeatherPrint = 0;
 unsigned long selectionIndicatorTime = 0;
 unsigned long selectionIndicator2Time = 0;
 unsigned long noteTime = 0;
+unsigned long snoozeTime = 0;
+unsigned long alarmSoundTime = 0;
+unsigned long lastAPIUpdate = 0;
+unsigned long displayDelay = 0;
 
 //Functions
 //=======================================================================
@@ -151,7 +158,7 @@ time_t parseISOTime(String iso) {
   t.tm_sec  = iso.substring(17, 19).toInt();
   t.tm_isdst = -1;
 
-  return mktime(&t);
+  return mktime(&t) - (gmtOffset + daylightOffset);//timegm(&t); //mktime(&t);
 }
 
 /**
@@ -178,7 +185,7 @@ void printAPIVariables(){
 
   Serial.println("\nDeparture\n==============");
   Serial.print("Scheduled Time: ");
-  Serial.println();
+  Serial.println(departureScheduledTime);
   Serial.print("Delay: ");
   Serial.println(departureDelay);
 }
@@ -311,8 +318,9 @@ void changeOffset(bool right, bool hour){
 */
 void playNote(int frequency, int duration) {
   if(!noteState){
-    Serial.println("Note Begin");
+    // Serial.println("Note Begin");
     ledcWriteTone(buzzerPin, frequency);
+    noteTime = millis();
     noteState = !noteState;
   }
   else if(millis() - noteTime > duration){
@@ -320,7 +328,8 @@ void playNote(int frequency, int duration) {
     noteTime = millis();
     noteState = !noteState;
     playSound = false;
-    Serial.println("Sound End");
+    alarmSoundTime = millis();
+    // Serial.println("Sound End");
   }
 }
 
@@ -406,7 +415,13 @@ void readButtons() {
               // Serial.println("Yellow");
               switch(screenPointer){
                 case 0:
-                  //Do nothing
+                  //Stop Alarm Button
+                  if(snooze){
+                    snooze = false;
+                    startSnoozeTime = false;
+                  }
+                  alarmActive = false;
+                  Serial.println("Alarm Stopped");
                   break;
                 case 1:
                   //Prep Time Screen
@@ -461,7 +476,14 @@ void readButtons() {
               // Serial.println("Green");
               switch(screenPointer){
                 case 0:
-                  //Do Nothing - clock screen
+                  //Snooze Button & Stop Alarm Button - clock 
+                  if(snooze){
+                    snooze = false;
+                    alarmActive = false;
+                    startSnoozeTime = false;
+                    Serial.println("Alarm Stopped");
+                  }
+                  else{snooze = true;}
                   break;
                 case 1:
                   //Prep Time Screen
@@ -498,23 +520,25 @@ void readButtons() {
                       Serial.print("API: ");
                       Serial.println(createFullEndpoint());
 
-                      Serial.print("Valid Endpoint: ");
+                      Serial.println("Valid Endpoint: ");
                       validFlight = checkFullEndpoint();
                       if(validFlight){
-                        if(arrival){
-                          typeBasedISO = arrivalScheduledTime; 
-                          typeBasedDelay = arrivalDelay;
-                        }
-                        else { 
-                          typeBasedISO = departureScheduledTime;
-                          typeBasedDelay = departureDelay;
-                        }
-                        smartAlarmTime = getSmartAlarm(typeBasedISO, typeBasedDelay, offsetTime);
+                        // if(arrival){
+                        //   typeBasedISO = arrivalScheduledTime; 
+                        //   typeBasedDelay = arrivalDelay;
+                        // }
+                        // else { 
+                        //   typeBasedISO = departureScheduledTime;
+                        //   typeBasedDelay = departureDelay;
+                        // }
+                        smartAlarmTime = getSmartAlarm(arrivalScheduledTime, arrivalDelay, offsetTime);
+                        // smartAlarmTime = getSmartAlarm(typeBasedISO, typeBasedDelay, offsetTime);
                         struct tm *info = localtime(&smartAlarmTime);
                         char buffer[15];
                         strftime(buffer, sizeof(buffer), "%H:%M", info);
                         Serial.print("Smart Alarm Set: ");
                         Serial.println(buffer);
+                        displayDelay = millis();
                       }
                       printAPIVariables();
                       break;
@@ -527,28 +551,28 @@ void readButtons() {
                       Serial.print("API: ");
                       Serial.println(createFullEndpoint());
 
-                      Serial.print("Valid Endpoint: ");
+                      Serial.println("Valid Endpoint: ");
                       validFlight = checkFullEndpoint();
                       if(validFlight){
-                        if(arrival){
-                          typeBasedISO = arrivalScheduledTime; 
-                          typeBasedDelay = arrivalDelay;
-                        }
-                        else { 
-                          typeBasedISO = departureScheduledTime;
-                          typeBasedDelay = departureDelay;
-                        }
-                        smartAlarmTime = getSmartAlarm(typeBasedISO, typeBasedDelay, offsetTime);
+                        // if(arrival){
+                        //   typeBasedISO = arrivalScheduledTime; 
+                        //   typeBasedDelay = arrivalDelay;
+                        // }
+                        // else { 
+                        //   typeBasedISO = departureScheduledTime;
+                        //   typeBasedDelay = departureDelay;
+                        // }
+                        smartAlarmTime = getSmartAlarm(departureScheduledTime, departureDelay, offsetTime);
+                        // smartAlarmTime = getSmartAlarm(typeBasedISO, typeBasedDelay, offsetTime);
                         struct tm *info = localtime(&smartAlarmTime);
                         char buffer[15];
                         strftime(buffer, sizeof(buffer), "%H:%M", info);
                         Serial.print("Smart Alarm Set: ");
                         Serial.println(buffer);
+                        Serial.print("Prep Time: ");
+                        displayDelay = millis();
                       }
                       printAPIVariables();
-                      break;
-                    case 3:
-                      //TODO
                       break;
                   }
                   break;
@@ -718,7 +742,7 @@ void initTime(){
   Returns current time.
 */
 time_t getCurrentTime(){
-  return baseTime + (millis() - baseMillis) / 1000;
+  return baseTime + (millis() - baseMillis) / 1000UL;
 }
 
 /**
@@ -839,7 +863,12 @@ void flightScreen(){
       else{
         lcd.print("Missing");
       }
-      //TODO
+      if(millis() - displayDelay > 3000){
+        editStage = 0;
+        lcd.clear();
+        screenPointer = 0;
+        displayDelay = millis();
+      }
       break;
   }
 }
@@ -925,13 +954,42 @@ void setup() {
 //=======================================================================
 void loop() {
   if(playSound){
-    Serial.println("Playing Sound");
-    playNote(c, 1000);
+    // Serial.println("Playing Sound");
+    playNote(c, 300);
   }
 
-  if(smartAlarm && validFlight){
+  if(smartAlarm && validFlight && alarmActive){
     if(getCurrentTime() > smartAlarmTime){
+      // Serial.print("Check 1");
+      if(!playSound){
+        // Serial.print("Check 2");
+        if(millis() - alarmSoundTime > 1200){
+          alarmSoundTime = millis();
+          playSound = true;
+          Serial.println("ALARM!");
+        }
+      }
       //Play Sound
+    }
+  }
+
+  if(snooze){
+    if(alarmActive){
+      Serial.println("Snooze Started");
+      startSnoozeTime = true;
+      snoozeTime = millis();
+      alarmActive = false;
+    }
+    snooze = false;
+  }
+
+  if(startSnoozeTime){
+    //I would set to 5 minutes in actuallity but for demonstration purposes 5 seconds will suffice.
+    if(millis() - snoozeTime > 5000){
+      Serial.println("Snooze Finished");
+      snoozeTime = millis();
+      alarmActive = true;
+      startSnoozeTime = false;
     }
   }
 
