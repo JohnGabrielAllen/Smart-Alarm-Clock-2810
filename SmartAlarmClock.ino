@@ -56,6 +56,7 @@ const long gmtOffset = -7 * 3600; //In Seconds
 const int daylightOffset = 3600; //In Seconds
 time_t baseTime;
 unsigned long baseMillis;
+time_t smartAlarmTime;
 
 //WiFi Setup
 //=======================================================================
@@ -67,12 +68,14 @@ const String apiKey   = "API_Key"; //API_Key
 //=======================================================================
 DynamicJsonDocument flightDoc(3072);
 String apiEndpoint = "https://aviation-edge.com/v2/public/timetable?key=" + apiKey + "&flight_iata="; // + "&type=";
-String flightIata = "                ";
+String flightIata = "DL1451          "; //"                "
 String flightType;
 int departureDelay;
 int arrivalDelay;
 String departureScheduledTime;
 String arrivalScheduledTime;
+String typeBasedISO;
+int typeBasedDelay;
 
 //PIN Setup
 //=======================================================================
@@ -93,6 +96,8 @@ bool noteState = false;
 bool playSound = false;
 bool smartAlarm = true;
 bool validFlight = false;
+bool alphabetDisplayLock = false;
+bool arrival;
 
 //Constant Strings for LCD
 //=======================================================================
@@ -122,18 +127,60 @@ unsigned long noteTime = 0;
 //Functions
 //=======================================================================
 
-void printAPIVariables(){
-  lcd.println("Arrival\n==============");
-  lcd.print("Scheduled Time: ");
-  lcd.println(arrivalScheduledTime);
-  lcd.print("Delay: ");
-  lcd.println(arrivalDelay);
+/**
+  Returns the time_t version of the smart alarm time.
+*/
+time_t getSmartAlarm(String iso, int delayMinutes, tm offsetTime) {
+  time_t arrival = parseISOTime(iso);
+  long offsetSeconds = (offsetTime.tm_hour * 3600L) + (offsetTime.tm_min * 60L);
+  long delaySeconds  = delayMinutes * 60L;
+  return arrival - offsetSeconds + delaySeconds;
+}
 
-  lcd.println("\Departure\n==============");
-  lcd.print("Scheduled Time: ");
-  lcd.println(departureScheduledTime);
-  lcd.print("Delay: ");
-  lcd.println(departureDelay);
+/**
+  Returns time from flight API in same time structure as our clock for easier comparison.
+*/
+time_t parseISOTime(String iso) {
+  struct tm t;
+
+  t.tm_year = iso.substring(0, 4).toInt() - 1900;
+  t.tm_mon  = iso.substring(5, 7).toInt() - 1;
+  t.tm_mday = iso.substring(8, 10).toInt();
+  t.tm_hour = iso.substring(11, 13).toInt();
+  t.tm_min  = iso.substring(14, 16).toInt();
+  t.tm_sec  = iso.substring(17, 19).toInt();
+  t.tm_isdst = -1;
+
+  return mktime(&t);
+}
+
+/**
+  Changes alphabetDisplayLock to false and updates flightIata string  to be empty after the current edit position.
+*/
+void alphabetDisplayUnlock(){
+  alphabetDisplayLock = false;
+  //Remove any previously existing text in flightIata after edit pointer
+  for(int i = flightEditPointer + 1; i < flightIata.length(); i++){
+    flightIata[i] = ' ';
+  }
+  //Re-align alphabet pointer
+  while(flightIata[flightEditPointer] != getAlphabet()){
+    moveAlphabet(true);
+  }
+}
+
+void printAPIVariables(){
+  Serial.println("\nArrival\n==============");
+  Serial.print("Scheduled Time: ");
+  Serial.println(arrivalScheduledTime);
+  Serial.print("Delay: ");
+  Serial.println(arrivalDelay);
+
+  Serial.println("\nDeparture\n==============");
+  Serial.print("Scheduled Time: ");
+  Serial.println();
+  Serial.print("Delay: ");
+  Serial.println(departureDelay);
 }
 
 /**
@@ -190,14 +237,16 @@ bool checkFullEndpoint(){
 
     //Departure Values
     if (!flight["departure"].isNull()){
+      Serial.println("Departure Found in API");
       departureScheduledTime = flightDoc[0]["departure"]["scheduledTime"].as<String>();
-      departureScheduledTime = flightDoc[0]["departure"]["delay"].as<String>();
+      departureDelay = flightDoc[0]["departure"]["delay"];
     }
 
     //Arrival Values
     if (!flight["arrival"].isNull()){
+      Serial.println("Arrival Found in API");
       arrivalScheduledTime = flightDoc[0]["arrival"]["scheduledTime"].as<String>();
-      arrivalScheduledTime = flightDoc[0]["arrival"]["delay"].as<String>();
+      arrivalDelay = flightDoc[0]["arrival"]["delay"];
     }
   }
 
@@ -325,10 +374,10 @@ void readButtons() {
                   //Flight Edit Screen
                   switch(editStage){
                     case 0:
-                      if(editStage == 0){
-                        moveAlphabet(false);
-                        // Serial.println(getAlphabet());
+                      if(alphabetDisplayLock){
+                        alphabetDisplayUnlock();
                       }
+                      moveAlphabet(false);
                       break;
                     case 1:
                       editStage++;
@@ -377,7 +426,11 @@ void readButtons() {
                   switch(editStage){
                     case 0:
                       if(editStage == 0){
+                        if(alphabetDisplayLock){
+                          alphabetDisplayUnlock();
+                        }
                         moveAlphabet(true);
+                        
                         // Serial.println(getAlphabet());
                       }
                       break;
@@ -420,7 +473,7 @@ void readButtons() {
                   //Flight Edit Screen
                   switch(editStage){
                     case 0:
-                      if(alphabetPointer == 0){ //Condition user enters an empty character
+                      if(alphabetPointer == 0 && flightIata[flightEditPointer] == getAlphabet()){ //Condition user enters an empty character
                         lcd.clear();
                         editStage++;
                         flightEditPointer = 0;
@@ -432,12 +485,13 @@ void readButtons() {
                       if(flightEditPointer > 15){ //Condition user enters a character on the last position on the lcd
                         lcd.clear();
                         flightEditPointer = 0;
-                        editStage++;
+                        editStage = 1;
                         Serial.println(flightIata);
                       }
                       break;
                     case 1:
                       flightType = "arrival";
+                      arrival = true;
                       editStage = 3;
                       Serial.println(flightType);
                       lcd.clear();
@@ -445,11 +499,28 @@ void readButtons() {
                       Serial.println(createFullEndpoint());
 
                       Serial.print("Valid Endpoint: ");
-                      Serial.println(checkFullEndpoint());
+                      validFlight = checkFullEndpoint();
+                      if(validFlight){
+                        if(arrival){
+                          typeBasedISO = arrivalScheduledTime; 
+                          typeBasedDelay = arrivalDelay;
+                        }
+                        else { 
+                          typeBasedISO = departureScheduledTime;
+                          typeBasedDelay = departureDelay;
+                        }
+                        smartAlarmTime = getSmartAlarm(typeBasedISO, typeBasedDelay, offsetTime);
+                        struct tm *info = localtime(&smartAlarmTime);
+                        char buffer[15];
+                        strftime(buffer, sizeof(buffer), "%H:%M", info);
+                        Serial.print("Smart Alarm Set: ");
+                        Serial.println(buffer);
+                      }
                       printAPIVariables();
                       break;
                     case 2:
                       flightType = "departure";
+                      arrival = false;
                       editStage = 3;
                       Serial.println(flightType);
                       lcd.clear();
@@ -457,7 +528,23 @@ void readButtons() {
                       Serial.println(createFullEndpoint());
 
                       Serial.print("Valid Endpoint: ");
-                      Serial.println(checkFullEndpoint());
+                      validFlight = checkFullEndpoint();
+                      if(validFlight){
+                        if(arrival){
+                          typeBasedISO = arrivalScheduledTime; 
+                          typeBasedDelay = arrivalDelay;
+                        }
+                        else { 
+                          typeBasedISO = departureScheduledTime;
+                          typeBasedDelay = departureDelay;
+                        }
+                        smartAlarmTime = getSmartAlarm(typeBasedISO, typeBasedDelay, offsetTime);
+                        struct tm *info = localtime(&smartAlarmTime);
+                        char buffer[15];
+                        strftime(buffer, sizeof(buffer), "%H:%M", info);
+                        Serial.print("Smart Alarm Set: ");
+                        Serial.println(buffer);
+                      }
                       printAPIVariables();
                       break;
                     case 3:
@@ -480,6 +567,7 @@ void readButtons() {
           case 18:
             //Cycle Button
             if(lastState18 == HIGH){
+              if(screenPointer == 1 && flightIata[flightEditPointer] != ' '){ alphabetDisplayLock = true; }
               // Serial.println("Blue");
               // playSound = true;
               editStage = 0;
@@ -709,7 +797,10 @@ void flightScreen(){
       lcd.setCursor(0,0);
       lcd.print(flightScrn);
       //Row 2
-      flightIata[flightEditPointer] = getAlphabet();
+      if(!alphabetDisplayLock){
+        //Update the character we are looking at based on the alphabet pointer location
+        flightIata[flightEditPointer] = getAlphabet();
+      }
       if(!indicatorState){
         lcd.setCursor(0,1);
         lcd.print(flightIata);
@@ -742,8 +833,14 @@ void flightScreen(){
       //show if api found flight
       lcd.setCursor(0,1);
       lcd.print("Flight: "); //Found or Missing
+      if(validFlight){
+        lcd.print("Found");
+      }
+      else{
+        lcd.print("Missing");
+      }
       //TODO
-
+      break;
   }
 }
 
@@ -830,6 +927,12 @@ void loop() {
   if(playSound){
     Serial.println("Playing Sound");
     playNote(c, 1000);
+  }
+
+  if(smartAlarm && validFlight){
+    if(getCurrentTime() > smartAlarmTime){
+      //Play Sound
+    }
   }
 
   // screenPointer = 7; //Test Case - Debugging
