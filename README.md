@@ -22,3 +22,6 @@ Pin 14 connects to a resister rated at 1K Ohms which connects to the middle leg 
 The transistor's left leg is connected to ground and it's right leg is connected to the negative side of our buzzer.
 
 The buttons are also all connected to ground as well as the LCD display.
+
+## Special Thanks
+Thanks to [Aviation Edge](https://aviation-edge.com) for letting us use a free API key. This was a huge help.
